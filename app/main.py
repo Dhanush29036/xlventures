@@ -8,9 +8,12 @@ Run with:
 from __future__ import annotations
 
 import structlog
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
+from app.agents.planner import PlannerAgent
+from app.agents.state import CompanyModel  # noqa: F401 — available for consumers
 from app.core.config import get_settings
 from app.core.lifespan import get_memory_manager, lifespan
 from app.memory.manager import HealthChecker, MemoryManager
@@ -47,7 +50,7 @@ async def health(
 
 
 # ---------------------------------------------------------------------------
-# Example agent-facing route (demonstrates DI pattern)
+# Memory query routes (used by agents and API consumers)
 # ---------------------------------------------------------------------------
 
 
@@ -80,3 +83,67 @@ async def icp_candidates(
 ) -> list:
     """Find ICP-matching companies via semantic + graph + dedup pipeline."""
     return await mm.find_icp_candidates(tenant_id=tenant_id, icp_config=icp_config)
+
+
+# ---------------------------------------------------------------------------
+# Planner Agent dependency
+# ---------------------------------------------------------------------------
+
+
+def get_planner_agent(request: Request) -> PlannerAgent:
+    """
+    FastAPI dependency — inject the compiled LangGraph PlannerAgent.
+
+    Usage::
+
+        @router.post("/pipeline/run")
+        async def run(planner: PlannerAgent = Depends(get_planner_agent)):
+            ...
+    """
+    return request.app.state.planner_agent
+
+
+# ---------------------------------------------------------------------------
+# Pipeline trigger route
+# ---------------------------------------------------------------------------
+
+
+class PipelineRunRequest(BaseModel):
+    """Request body for triggering the full enrichment pipeline."""
+
+    tenant_id: str
+    domain: str
+    company_data: dict
+    icp_config: dict
+    people: list[dict] = []
+
+
+@app.post("/pipeline/run", tags=["agents"])
+async def run_pipeline(
+    body: PipelineRunRequest,
+    planner: PlannerAgent = Depends(get_planner_agent),
+) -> dict:
+    """
+    Trigger the full LangGraph enrichment pipeline for one company.
+
+    Orchestrates:
+      check_skip → TriggerMonitor → ICPScorer → ContactEnrichment
+      → PersonaFinder → Validation → Summary
+
+    Returns the final PlannerState dict including:
+      - ``recommended_action``: "outreach" | "nurture" | "disqualify"
+      - ``status``:             "completed" | "skipped" | "awaiting_hitl" | "failed"
+      - ``summary``:            Full RunSummaryModel dict
+    """
+    try:
+        final_state = await planner.run(
+            tenant_id=body.tenant_id,
+            domain=body.domain,
+            company_data=body.company_data,
+            icp_config=body.icp_config,
+            people=body.people,
+        )
+        return final_state
+    except Exception as exc:
+        logger.exception("pipeline_run_failed", domain=body.domain, error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))

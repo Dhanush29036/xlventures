@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.db.session import build_async_engine, build_session_factory
 from app.memory.episodic import EpisodicMemoryStore
 from app.memory.graph import GraphStore
+from app.agents.planner import PlannerAgent
 from app.memory.manager import MemoryManager
 from app.memory.semantic import SemanticICPStore
 
@@ -96,10 +97,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: C901
         qdrant=semantic_store,
     )
 
+    # ── 5b. Build LangGraph Planner ────────────────────────────────────────
+    log.info("building_planner_graph")
+    planner_agent = PlannerAgent(memory_manager)
+
     # ── 6. Inject into app.state ───────────────────────────────────────────
     app.state.memory_manager = memory_manager
+    app.state.planner_agent = planner_agent
     app.state.engine = engine
-    log.info("memory_manager_ready", stores=["postgres", "redis", "neo4j", "qdrant"])
+    log.info("lifespan_startup_complete", stores=["postgres", "redis", "neo4j", "qdrant"])
 
     yield  # ─── application runs ───────────────────────────────────────────
 

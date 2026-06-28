@@ -22,9 +22,7 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
-        # Register task modules here, e.g.:
-        # "app.tasks.enrichment",
-        # "app.tasks.scoring",
+        "app.tasks",
     ],
 )
 

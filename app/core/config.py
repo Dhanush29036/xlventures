@@ -76,6 +76,11 @@ class Settings(BaseSettings):
         description="Celery result backend URL (Redis DB 1)",
     )
 
+    # ── JWT ────────────────────────────────────────────────────────────────────
+    JWT_SECRET: str = Field(default="change-me-in-production", description="JWT signing secret")
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 1440  # 24 hours
+
     @field_validator("POSTGRES_URL")
     @classmethod
     def ensure_asyncpg_driver(cls, v: str) -> str:

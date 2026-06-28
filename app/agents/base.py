@@ -60,12 +60,39 @@ class BaseAgent(ABC):
         )
 
         log.info("agent_start")
+        
+        # Instantiate real-time Event Publisher
+        from app.core.events import AgentEventPublisher
+        publisher = AgentEventPublisher(self._mm._redis.client)
+        await publisher.publish_agent_started(run_id, self.agent_name)
+
         try:
             result = await self._execute(state)
             log.info("agent_complete", result_keys=list(result.keys()))
+            
+            # Publish completion event
+            summary = {
+                "status": result.get("status", "completed"),
+                "error": result.get("error"),
+            }
+            if self.agent_name == "icp_scorer":
+                summary["icp_score"] = result.get("icp_score")
+                summary["icp_is_match"] = result.get("icp_is_match")
+            elif self.agent_name == "validation":
+                summary["hitl_required"] = result.get("hitl_required")
+                summary["validation_passed"] = result.get("validation_passed")
+                if result.get("hitl_required") and result.get("hitl_item_id"):
+                    await publisher.publish_hitl_required(
+                        run_id,
+                        str(result.get("hitl_item_id")),
+                        {"issues": result.get("validation_issues", [])}
+                    )
+            
+            await publisher.publish_agent_completed(run_id, self.agent_name, summary)
             return result
         except Exception as exc:
             log.exception("agent_error", error=str(exc))
+            await publisher.publish_run_failed(run_id, f"[{self.agent_name}] {exc!s}")
             return {
                 "status": "failed",
                 "error": f"[{self.agent_name}] {exc!s}",

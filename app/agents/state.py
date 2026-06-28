@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
-
+from typing import Any
+from typing_extensions import Annotated, TypedDict
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing_extensions import TypedDict
 
 
 # ---------------------------------------------------------------------------

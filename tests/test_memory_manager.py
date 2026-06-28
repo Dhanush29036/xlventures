@@ -51,7 +51,7 @@ def make_memory_manager(
     -------
     (manager, pg_mock, redis_mock, neo4j_mock, qdrant_mock)
     """
-    pg_mock = AsyncMock()
+    pg_mock = MagicMock()
     # Simulate successful SELECT 1 for health check
     pg_session = AsyncMock()
     pg_session.__aenter__ = AsyncMock(return_value=pg_session)

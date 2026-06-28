@@ -196,11 +196,10 @@ def build_planner_graph(mm: MemoryManager) -> StateGraph:
 
     graph = StateGraph(PlannerState)
 
-    # ── Add nodes ─────────────────────────────────────────────────────────────
-    graph.add_node(
-        "check_skip",
-        lambda state: _check_skip_node(state, mm),
-    )
+    async def check_skip_wrapper(state: PlannerState) -> dict[str, Any]:
+        return await _check_skip_node(state, mm)
+
+    graph.add_node("check_skip", check_skip_wrapper)
     graph.add_node("trigger_monitor", _make_node(trigger_monitor))
     graph.add_node("icp_scorer", _make_node(icp_scorer))
     graph.add_node("contact_enrichment", _make_node(contact_enrichment))
@@ -299,6 +298,7 @@ class PlannerAgent:
         # ── Create agent_run in Postgres ──────────────────────────────────────
         run_repo = AgentRunRepository(self._mm._pg)
         await run_repo.create(
+            id=run_id,
             tenant_id=tenant_id,
             status="running",
             plan_json={

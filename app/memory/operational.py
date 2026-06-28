@@ -3,6 +3,8 @@ SQLAlchemy ORM models + async base repository.
 
 Tables
 ------
+- tenants         : multi-tenant organisation record
+- users           : platform users linked to tenants
 - agent_runs      : top-level planner run record
 - hitl_queue      : human-in-the-loop review queue
 - icp_configs     : tenant ICP rule sets
@@ -43,6 +45,54 @@ class Base(DeclarativeBase):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Auth Models
+# ---------------------------------------------------------------------------
+
+
+class Tenant(Base):
+    """Multi-tenant organisation."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    email: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Tenant id={self.id} email={self.email}>"
+
+
+class User(Base):
+    """Platform user linked to a tenant."""
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
+    hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<User id={self.id} email={self.email}>"
 
 
 # ---------------------------------------------------------------------------

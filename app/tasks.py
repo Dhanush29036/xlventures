@@ -14,6 +14,59 @@ from app.memory.operational import AgentRunRepository
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
+# ── Inline demo companies (avoids fragile scripts/ module import under Celery) ──
+DEMO_COMPANIES = [
+    {
+        "domain": "acme-saas.io",
+        "name": "Acme SaaS",
+        "headcount": 150,
+        "funding_stage": "Series B",
+        "industry": "SaaS",
+        "hq_country": "US",
+        "annual_revenue_usd": 12_000_000,
+        "tech_stack": ["Python", "AWS", "React"],
+        "people": [
+            {"email": "cto@acme-saas.io", "name": "Alex Chen", "title": "CTO", "seniority": "C-Suite", "is_decision_maker": True},
+            {"email": "vpe@acme-saas.io", "name": "Jordan Smith", "title": "VP Engineering", "seniority": "VP", "is_decision_maker": True},
+        ],
+        "signals": [
+            {"type": "funding_round", "score": 0.9, "data": {"stage": "Series B", "amount_usd": 25_000_000}},
+        ],
+    },
+    {
+        "domain": "fintech-flow.com",
+        "name": "FintechFlow",
+        "headcount": 280,
+        "funding_stage": "Series C",
+        "industry": "Fintech",
+        "hq_country": "UK",
+        "annual_revenue_usd": 45_000_000,
+        "tech_stack": ["Go", "Kubernetes", "PostgreSQL"],
+        "people": [
+            {"email": "cpo@fintech-flow.com", "name": "Sam Patel", "title": "CPO", "seniority": "C-Suite", "is_decision_maker": True},
+        ],
+        "signals": [
+            {"type": "job_posting", "score": 0.5, "data": {"roles": ["Senior Backend Engineer"]}},
+        ],
+    },
+    {
+        "domain": "cloudnative.dev",
+        "name": "CloudNative Dev",
+        "headcount": 85,
+        "funding_stage": "Series A",
+        "industry": "Cloud Infrastructure",
+        "hq_country": "US",
+        "annual_revenue_usd": 5_000_000,
+        "tech_stack": ["Rust", "Terraform", "GCP"],
+        "people": [
+            {"email": "ceo@cloudnative.dev", "name": "Taylor Wong", "title": "CEO", "seniority": "C-Suite", "is_decision_maker": True},
+        ],
+        "signals": [
+            {"type": "tech_adoption", "score": 0.6, "data": {"stack": ["Rust", "Terraform"]}},
+        ],
+    },
+]
+
 async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, selected_agents: list | None = None):
     # Initialize connection to all 4 stores
     engine = build_async_engine(settings)
@@ -58,8 +111,6 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, sel
     run_repo = AgentRunRepository(session_factory)
 
     try:
-        from scripts.seed_demo_data import COMPANIES
-        
         # Update run status to running
         await run_repo.update(uuid.UUID(run_id), status="running")
         
@@ -75,8 +126,6 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, sel
                 "hq_country": "US",
                 "annual_revenue_usd": 15_000_000,
                 "tech_stack": ["Python", "AWS", "React"],
-                "icp_score": 0.85,
-                "recommended_action": "outreach",
                 "people": [
                     {"email": f"cto@{custom_domain}", "name": "Jane Doe", "title": "CTO", "seniority": "C-Suite", "is_decision_maker": True},
                     {"email": f"vpe@{custom_domain}", "name": "John Doe", "title": "VP Engineering", "seniority": "VP", "is_decision_maker": True},
@@ -86,7 +135,7 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, sel
                 ],
             }]
         else:
-            companies_to_run = COMPANIES
+            companies_to_run = DEMO_COMPANIES
 
         # Execute the planner for each company
         for company in companies_to_run:

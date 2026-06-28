@@ -372,32 +372,52 @@ class PlannerAgent:
         icp_config: dict[str, Any],
         people: list[dict[str, Any]] | None = None,
         selected_agents: list[str] | None = None,
+        run_id: str | uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """
         Execute the full pipeline for one company.
         """
-        run_id = uuid.uuid4()
+        if run_id is None:
+            actual_run_id = uuid.uuid4()
+        elif isinstance(run_id, str):
+            actual_run_id = uuid.UUID(run_id)
+        else:
+            actual_run_id = run_id
+
         log = self._log.bind(
-            tenant_id=tenant_id, domain=domain, run_id=str(run_id)
+            tenant_id=tenant_id, domain=domain, run_id=str(actual_run_id)
         )
         log.info("planner_run_start")
 
-        # ── Create agent_run in Postgres ──────────────────────────────────────
+        # ── Create or update agent_run in Postgres ────────────────────────────
         run_repo = AgentRunRepository(self._mm._pg)
-        await run_repo.create(
-            id=run_id,
-            tenant_id=tenant_id,
-            status="running",
-            plan_json={
-                "domain": domain,
-                "icp_config_keys": list(icp_config.keys()),
-                "people_provided": len(people or []),
-            },
-        )
+        existing = await run_repo.get(actual_run_id)
+        if existing:
+            await run_repo.update(
+                actual_run_id,
+                status="running",
+                plan_json={
+                    **(existing.plan_json or {}),
+                    "domain": domain,
+                    "icp_config_keys": list(icp_config.keys()),
+                    "people_provided": len(people or []),
+                }
+            )
+        else:
+            await run_repo.create(
+                id=actual_run_id,
+                tenant_id=tenant_id,
+                status="running",
+                plan_json={
+                    "domain": domain,
+                    "icp_config_keys": list(icp_config.keys()),
+                    "people_provided": len(people or []),
+                },
+            )
 
         # ── Build initial state ───────────────────────────────────────────────
         initial_state: PlannerState = {
-            "run_id": str(run_id),
+            "run_id": str(actual_run_id),
             "tenant_id": tenant_id,
             "domain": domain,
             "company_data": company_data,
@@ -425,5 +445,5 @@ class PlannerAgent:
         except Exception as exc:
             log.exception("planner_run_error", error=str(exc))
             # Mark run as failed in Postgres
-            await run_repo.update(run_id, status="failed")
+            await run_repo.update(actual_run_id, status="failed")
             raise

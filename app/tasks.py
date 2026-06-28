@@ -162,6 +162,7 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, sel
                 icp_config=icp_config,
                 people=people,
                 selected_agents=selected_agents,
+                run_id=run_id,
             )
             
         await run_repo.update(uuid.UUID(run_id), status="completed")

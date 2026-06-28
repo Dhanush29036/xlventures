@@ -1,0 +1,21 @@
+{
+  "agent_id": "signal_aggregator",
+  "name": "Signal Aggregator",
+  "description": "Aggregates signals from multiple market sources and assigns relevance scores",
+  "capabilities": [
+    "news_scraper",
+    "data_aggregator"
+  ],
+  "required_inputs": [
+    "domain",
+    "signals"
+  ],
+  "outputs": [
+    "aggregated_signals",
+    "relevance_score"
+  ],
+  "typical_duration_seconds": 30,
+  "is_core": false,
+  "compatible_with": [],
+  "icon": "ti-plug"
+}

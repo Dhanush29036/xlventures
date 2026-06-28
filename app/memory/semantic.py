@@ -70,25 +70,27 @@ class SemanticICPStore:
 
     def __init__(
         self,
-        host: str = "localhost",
-        port: int = 6333,
-        grpc_port: int = 6334,
+        host: str | None = None,
+        port: int | None = None,
+        grpc_port: int | None = None,
         api_key: str | None = None,
-        collection_name: str = "companies",
-        vector_size: int = 1536,
-        openai_api_key: str = "",
-        embedding_model: str = "text-embedding-3-small",
+        collection_name: str | None = None,
+        vector_size: int | None = None,
+        openai_api_key: str | None = None,
+        embedding_model: str | None = None,
     ) -> None:
-        self._host = host
-        self._port = port
-        self._grpc_port = grpc_port
-        self._api_key = api_key
-        self._collection = collection_name
-        self._vector_size = vector_size
-        self._embedding_model = embedding_model
-
+        from app.core.config import get_settings
+        settings = get_settings()
+        self._host = host or settings.QDRANT_HOST
+        self._port = port or settings.QDRANT_PORT
+        self._grpc_port = grpc_port or settings.QDRANT_GRPC_PORT
+        self._api_key = api_key or settings.QDRANT_API_KEY
+        self._collection = collection_name or settings.QDRANT_COLLECTION_NAME
+        self._vector_size = vector_size or settings.QDRANT_VECTOR_SIZE
+        self._embedding_model = embedding_model or settings.OPENAI_EMBEDDING_MODEL
+        openai_key = openai_api_key or settings.OPENAI_API_KEY or "dummy-key-for-testing"
+        self._openai = openai.AsyncOpenAI(api_key=openai_key)
         self._client: AsyncQdrantClient | None = None
-        self._openai = openai.AsyncOpenAI(api_key=openai_api_key)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 

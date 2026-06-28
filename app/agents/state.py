@@ -127,6 +127,7 @@ class PlannerState(TypedDict, total=False):
     company_data: dict[str, Any]        # raw company profile dict
     icp_config: dict[str, Any]          # ICP rules + description + persona_json
     prior_context: dict[str, Any]       # output of MM.get_company_context()
+    selected_agents: list[str]          # IDs of agents to run
 
     # ── Deduplication ────────────────────────────────────────────────────────
     should_skip: bool                   # True → skip all agents, go to END

@@ -40,16 +40,18 @@ class GraphStore:
 
     def __init__(
         self,
-        uri: str,
-        user: str,
-        password: str,
+        uri: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
         database: str = "neo4j",
         max_connection_pool_size: int = 50,
     ) -> None:
-        self._uri = uri
-        self._auth = (user, password)
-        self._database = database
-        self._pool_size = max_connection_pool_size
+        from app.core.config import get_settings
+        settings = get_settings()
+        self._uri = uri or settings.NEO4J_URI
+        self._auth = (user or settings.NEO4J_USER, password or settings.NEO4J_PASSWORD)
+        self._database = database or settings.NEO4J_DATABASE
+        self._pool_size = max_connection_pool_size or settings.NEO4J_MAX_CONNECTION_POOL_SIZE
         self._driver: AsyncDriver | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────

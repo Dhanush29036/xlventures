@@ -16,6 +16,17 @@ const navItems = [
       <polygon points="5,3 19,12 5,21"/><line x1="19" y1="3" x2="19" y2="21"/>
     </svg>
   )},
+  { href: "/dashboard/studio", label: "Agent Studio", icon: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+    </svg>
+  ), highlight: true},
+  { href: "/dashboard/studio/pipeline", label: "Pipeline Builder", icon: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/>
+      <line x1="7" y1="11.5" x2="17" y2="6.5"/><line x1="7" y1="12.5" x2="17" y2="17.5"/>
+    </svg>
+  ), indent: true},
   { href: "/dashboard/hitl", label: "Review Queue", icon: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
@@ -110,16 +121,42 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 key={item.href}
                 href={item.href}
                 className={`sidebar-link ${isActive ? "active" : ""}`}
+                style={{
+                  ...(item.indent ? { paddingLeft: "2rem", marginLeft: "0.5rem" } : {}),
+                  ...(item.highlight && !isActive ? {
+                    background: "linear-gradient(135deg, rgba(139,92,246,0.12) 0%, rgba(59,130,246,0.08) 100%)",
+                    border: "1px solid rgba(139,92,246,0.2)",
+                    borderRadius: 8,
+                  } : {}),
+                }}
               >
-                <span style={{ 
-                  opacity: isActive ? 1 : 0.6,
+                <span style={{
+                  opacity: isActive ? 1 : (item.highlight ? 0.85 : 0.6),
                   transition: "opacity 0.15s",
                   display: "flex",
                   alignItems: "center",
+                  color: item.highlight && !isActive ? "#a78bfa" : "inherit",
                 }}>
                   {item.icon}
                 </span>
-                <span style={{ flex: 1 }}>{item.label}</span>
+                <span style={{
+                  flex: 1,
+                  color: item.highlight && !isActive ? "#a78bfa" : "inherit",
+                  fontWeight: item.highlight ? 600 : undefined,
+                }}>{item.label}</span>
+                {item.highlight && !isActive && (
+                  <span style={{
+                    background: "linear-gradient(135deg, #7c3aed, #3b82f6)",
+                    color: "white",
+                    borderRadius: "5px",
+                    padding: "0.1rem 0.4rem",
+                    fontSize: "0.62rem",
+                    fontWeight: 700,
+                    letterSpacing: "0.05em",
+                  }}>
+                    NEW
+                  </span>
+                )}
                 {item.badge && showContent && hitlCount > 0 && (
                   <span style={{
                     background: "var(--brand-purple)",

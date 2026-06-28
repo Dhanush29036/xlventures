@@ -41,13 +41,15 @@ class EpisodicMemoryStore:
 
     def __init__(
         self,
-        redis_url: str,
-        default_ttl: int = 2_592_000,
-        max_connections: int = 50,
+        redis_url: str | None = None,
+        default_ttl: int | None = None,
+        max_connections: int | None = None,
     ) -> None:
-        self._url = redis_url
-        self._default_ttl = default_ttl
-        self._max_connections = max_connections
+        from app.core.config import get_settings
+        settings = get_settings()
+        self._url = redis_url or settings.REDIS_URL
+        self._default_ttl = default_ttl or settings.EPISODIC_TTL_SECONDS
+        self._max_connections = max_connections or settings.REDIS_MAX_CONNECTIONS
         self._pool: ConnectionPool | None = None
         self._redis: Redis | None = None
 

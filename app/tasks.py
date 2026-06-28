@@ -131,5 +131,5 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict):
         await engine.dispose()
 
 @celery_app.task(name="app.tasks.run_pipeline")
-def run_pipeline(run_id: str, tenant_id: str, icp_config: dict):
+def run_pipeline(run_id: str, tenant_id: str, icp_config: dict, selected_agents: list | None = None):
     asyncio.run(_run_pipeline_async(run_id, tenant_id, icp_config))

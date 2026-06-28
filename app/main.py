@@ -22,6 +22,7 @@ from app.api.routes.icp import router as icp_router
 from app.api.routes.results import router as results_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.stream import router as stream_router
+from app.api.routes.studio import router as studio_router
 from app.core.config import get_settings
 from app.core.logging_config import configure_logging
 from app.db.session import build_async_engine, build_session_factory
@@ -151,6 +152,7 @@ app.include_router(runs_router, prefix=API_PREFIX)
 app.include_router(hitl_router, prefix=API_PREFIX)
 app.include_router(results_router, prefix=API_PREFIX)
 app.include_router(stream_router, prefix=API_PREFIX)
+app.include_router(studio_router)  # No prefix: routes are /studio/...
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

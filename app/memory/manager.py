@@ -37,16 +37,21 @@ class MemoryManager:
 
     def __init__(
         self,
-        pg: async_sessionmaker[AsyncSession],
-        redis: EpisodicMemoryStore,
-        neo4j: GraphStore,
-        qdrant: SemanticICPStore,
+        pg: async_sessionmaker[AsyncSession] | None = None,
+        redis: EpisodicMemoryStore | None = None,
+        neo4j: GraphStore | None = None,
+        qdrant: SemanticICPStore | None = None,
     ) -> None:
+        if pg is None:
+            from sqlalchemy.ext.asyncio import create_async_engine
+            from app.core.config import get_settings
+            engine = create_async_engine(get_settings().POSTGRES_URL)
+            pg = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         self._pg = pg
-        self._redis = redis
-        self._neo4j = neo4j
-        self._qdrant = qdrant
-        self._audit = AuditLogRepository(pg)
+        self._redis = redis or EpisodicMemoryStore()
+        self._neo4j = neo4j or GraphStore()
+        self._qdrant = qdrant or SemanticICPStore()
+        self._audit = AuditLogRepository(self._pg)
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

@@ -81,11 +81,24 @@ def _make_node(agent: BaseAgent):
     """Wrap an agent's run() method as a LangGraph node coroutine."""
 
     async def node(state: PlannerState) -> dict[str, Any]:
+        # Respect user-selected agents
+        selected = state.get("selected_agents")
+        if selected is not None and agent.agent_name not in selected:
+            logger.info("agent_skipped_by_user_selection", agent=agent.agent_name)
+            return {}
         return await agent.run(state)
 
     node.__name__ = agent.agent_name
     return node
 
+async def _filter_available_agents(state: PlannerState) -> dict[str, Any]:
+    """
+    Initial node to log or filter the available agents based on the selected_agents array.
+    """
+    selected = state.get("selected_agents")
+    if selected is not None:
+        logger.info("filtering_available_agents", selected_agents=selected)
+    return {}
 
 async def _check_skip_node(
     state: PlannerState,
@@ -199,6 +212,7 @@ def build_planner_graph(mm: MemoryManager) -> StateGraph:
     async def check_skip_wrapper(state: PlannerState) -> dict[str, Any]:
         return await _check_skip_node(state, mm)
 
+    graph.add_node("filter_available_agents", _filter_available_agents)
     graph.add_node("check_skip", check_skip_wrapper)
     graph.add_node("trigger_monitor", _make_node(trigger_monitor))
     graph.add_node("icp_scorer", _make_node(icp_scorer))
@@ -208,7 +222,8 @@ def build_planner_graph(mm: MemoryManager) -> StateGraph:
     graph.add_node("summary", _make_node(summary_agent))
 
     # ── Define edges ──────────────────────────────────────────────────────────
-    graph.add_edge(START, "check_skip")
+    graph.add_edge(START, "filter_available_agents")
+    graph.add_edge("filter_available_agents", "check_skip")
 
     graph.add_conditional_edges(
         "check_skip",
@@ -272,22 +287,10 @@ class PlannerAgent:
         company_data: dict[str, Any],
         icp_config: dict[str, Any],
         people: list[dict[str, Any]] | None = None,
+        selected_agents: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Execute the full pipeline for one company.
-
-        1. Creates an ``agent_run`` record in Postgres.
-        2. Builds the initial PlannerState.
-        3. Invokes the LangGraph graph asynchronously.
-        4. Returns the final state dict.
-
-        Parameters
-        ----------
-        tenant_id:    Tenant executing this run.
-        domain:       Target company domain.
-        company_data: Raw company profile dict.
-        icp_config:   ICP rules + description + persona_json.
-        people:       Optional pre-fetched list of person dicts.
         """
         run_id = uuid.uuid4()
         log = self._log.bind(
@@ -322,6 +325,8 @@ class PlannerAgent:
             "status": "running",
             "error": None,
         }
+        if selected_agents is not None:
+            initial_state["selected_agents"] = selected_agents
 
         # ── Execute LangGraph pipeline ────────────────────────────────────────
         try:

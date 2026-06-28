@@ -182,30 +182,105 @@ def _route_after_error(state: PlannerState) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Custom Worker Agent & Loader
+# ---------------------------------------------------------------------------
+
+class CustomWorkerAgent(BaseAgent):
+    def __init__(self, agent_id: str, name: str, description: str, tools_needed: list[str], memory_manager: MemoryManager):
+        super().__init__(memory_manager)
+        self.agent_name = agent_id
+        self.display_name = name
+        self.description = description
+        self.tools_needed = tools_needed
+
+    async def _execute(self, state: PlannerState) -> dict[str, Any]:
+        import importlib
+        try:
+            mod = importlib.import_module(f"app.agents.workers.{self.agent_name}")
+            func = getattr(mod, f"{self.agent_name}_agent")
+            
+            inputs = {
+                "domain": state.get("domain"),
+                "company_data": state.get("company_data"),
+                "people": state.get("people"),
+                "signals": state.get("signals"),
+            }
+            res = await func(inputs)
+            
+            return {
+                "status": "completed",
+                "signals": state.get("signals", []) + [{
+                    "type": "custom_agent_output",
+                    "score": 0.8,
+                    "data": {
+                        "agent_id": self.agent_name,
+                        "result": res.get("result") or res
+                    }
+                }]
+            }
+        except Exception as e:
+            self._logger.exception("custom_agent_exec_error", agent=self.agent_name, error=str(e))
+            return {
+                "status": "failed",
+                "error": f"[{self.agent_name}] {e!s}"
+            }
+
+def load_custom_agents(mm: MemoryManager) -> dict[str, CustomWorkerAgent]:
+    import os
+    import json
+    custom_agents = {}
+    worker_path = os.path.join(os.path.dirname(__file__), "workers")
+    if os.path.exists(worker_path):
+        for file in os.listdir(worker_path):
+            if file.endswith(".json"):
+                try:
+                    with open(os.path.join(worker_path, file), "r") as f:
+                        data = json.load(f)
+                        agent_id = data.get("agent_id")
+                        if agent_id:
+                            custom_agents[agent_id] = CustomWorkerAgent(
+                                agent_id=agent_id,
+                                name=data.get("name", agent_id),
+                                description=data.get("description", ""),
+                                tools_needed=data.get("capabilities", []),
+                                memory_manager=mm
+                            )
+                except Exception:
+                    pass
+    return custom_agents
+
+
+# ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
 
 
-def build_planner_graph(mm: MemoryManager) -> StateGraph:
+def build_planner_graph(mm: MemoryManager, selected_agents: list[str] | None = None) -> StateGraph:
     """
-    Build and return the compiled LangGraph for the prospect intelligence pipeline.
-
-    Parameters
-    ----------
-    mm:
-        Connected MemoryManager instance (injected at startup).
-
-    Returns
-    -------
-    Compiled LangGraph app (call ``.ainvoke(initial_state)`` to run).
+    Build and return the compiled LangGraph dynamically.
     """
-    # Instantiate all specialized agents with the shared MemoryManager
+    # Instantiate core agents
     trigger_monitor = TriggerMonitorAgent(mm)
     icp_scorer = IcpScorerAgent(mm)
     contact_enrichment = ContactEnrichmentAgent(mm)
     persona_finder = PersonaFinderAgent(mm)
     validation = ValidationAgent(mm)
     summary_agent = SummaryAgent(mm)
+
+    core_agents = {
+        "trigger_monitor": trigger_monitor,
+        "company_icp_agent": icp_scorer,
+        "icp_scorer": icp_scorer,
+        "contact_enrichment": contact_enrichment,
+        "persona_finder": persona_finder,
+        "validation_agent": validation,
+        "validation": validation,
+        "summary_agent": summary_agent,
+        "summary": summary_agent,
+    }
+
+    custom_agents = load_custom_agents(mm)
+    all_agents = {**core_agents, **custom_agents}
 
     graph = StateGraph(PlannerState)
 
@@ -214,42 +289,63 @@ def build_planner_graph(mm: MemoryManager) -> StateGraph:
 
     graph.add_node("filter_available_agents", _filter_available_agents)
     graph.add_node("check_skip", check_skip_wrapper)
-    graph.add_node("trigger_monitor", _make_node(trigger_monitor))
-    graph.add_node("icp_scorer", _make_node(icp_scorer))
-    graph.add_node("contact_enrichment", _make_node(contact_enrichment))
-    graph.add_node("persona_finder", _make_node(persona_finder))
-    graph.add_node("validation", _make_node(validation))
-    graph.add_node("summary", _make_node(summary_agent))
 
-    # ── Define edges ──────────────────────────────────────────────────────────
+    # Determine execution sequence
+    if selected_agents:
+        # Use exact sequence selected by user
+        sequence = [a for a in selected_agents if a in all_agents]
+    else:
+        sequence = ["trigger_monitor", "icp_scorer", "contact_enrichment", "persona_finder", "validation", "summary"]
+
+    for agent_id in sequence:
+        agent = all_agents[agent_id]
+        graph.add_node(agent_id, _make_node(agent))
+
+    # Add edges
     graph.add_edge(START, "filter_available_agents")
     graph.add_edge("filter_available_agents", "check_skip")
 
+    first_agent = sequence[0] if sequence else "summary"
+    
+    def _route_after_skip_dynamic(state: PlannerState) -> str:
+        if state.get("should_skip"):
+            return "end_skipped"
+        return first_agent
+
     graph.add_conditional_edges(
         "check_skip",
-        _route_after_skip,
+        _route_after_skip_dynamic,
         {
             "end_skipped": END,
-            "trigger_monitor": "trigger_monitor",
+            first_agent: first_agent,
         },
     )
 
-    graph.add_edge("trigger_monitor", "icp_scorer")
-    graph.add_edge("icp_scorer", "contact_enrichment")
-    graph.add_edge("contact_enrichment", "persona_finder")
-    graph.add_edge("persona_finder", "validation")
-
-    graph.add_conditional_edges(
-        "validation",
-        _route_after_validation,
-        {
-            "end_hitl": END,
-            "end_failed": END,
-            "summary": "summary",
-        },
-    )
-
-    graph.add_edge("summary", END)
+    for i in range(len(sequence)):
+        current = sequence[i]
+        if i == len(sequence) - 1:
+            graph.add_edge(current, END)
+        else:
+            nxt = sequence[i + 1]
+            if current in ("validation", "validation_agent"):
+                def _route_after_val_dynamic(state: PlannerState) -> str:
+                    if state.get("hitl_required"):
+                        return "end_hitl"
+                    if not state.get("validation_passed", True):
+                        return "end_failed"
+                    return nxt
+                
+                graph.add_conditional_edges(
+                    current,
+                    _route_after_val_dynamic,
+                    {
+                        "end_hitl": END,
+                        "end_failed": END,
+                        nxt: nxt,
+                    }
+                )
+            else:
+                graph.add_edge(current, nxt)
 
     return graph.compile()
 
@@ -261,23 +357,11 @@ def build_planner_graph(mm: MemoryManager) -> StateGraph:
 
 class PlannerAgent:
     """
-    High-level interface for the LangGraph planner.  Used by API routes and
-    Celery tasks to trigger the full enrichment pipeline for a company.
-
-    Example::
-
-        planner = PlannerAgent(memory_manager)
-        result  = await planner.run(
-            tenant_id="tenant_abc",
-            domain="acme.com",
-            company_data={...},
-            icp_config={...},
-        )
+    High-level interface for the LangGraph planner.
     """
 
     def __init__(self, memory_manager: MemoryManager) -> None:
         self._mm = memory_manager
-        self._graph = build_planner_graph(memory_manager)
         self._log = logger.bind(agent="planner")
 
     async def run(
@@ -330,7 +414,8 @@ class PlannerAgent:
 
         # ── Execute LangGraph pipeline ────────────────────────────────────────
         try:
-            final_state: dict[str, Any] = await self._graph.ainvoke(initial_state)
+            graph = build_planner_graph(self._mm, selected_agents)
+            final_state: dict[str, Any] = await graph.ainvoke(initial_state)
             log.info(
                 "planner_run_complete",
                 status=final_state.get("status"),

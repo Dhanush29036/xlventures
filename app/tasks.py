@@ -14,7 +14,7 @@ from app.memory.operational import AgentRunRepository
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
-async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict):
+async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, selected_agents: list | None = None):
     # Initialize connection to all 4 stores
     engine = build_async_engine(settings)
     session_factory = build_session_factory(engine)
@@ -112,6 +112,7 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict):
                 company_data=company_data,
                 icp_config=icp_config,
                 people=people,
+                selected_agents=selected_agents,
             )
             
         await run_repo.update(uuid.UUID(run_id), status="completed")
@@ -132,4 +133,4 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict):
 
 @celery_app.task(name="app.tasks.run_pipeline")
 def run_pipeline(run_id: str, tenant_id: str, icp_config: dict, selected_agents: list | None = None):
-    asyncio.run(_run_pipeline_async(run_id, tenant_id, icp_config))
+    asyncio.run(_run_pipeline_async(run_id, tenant_id, icp_config, selected_agents))

@@ -137,57 +137,61 @@ async def execute_workflow(
     if body.overrides:
         icp_rules.update(body.overrides)
         
-    async with session_factory() as session:
-        # Save ICP config to DB (create simple structure if missing table setup here)
-        icp_id = str(uuid.uuid4())
-        await session.execute(
-            text("""
-                INSERT INTO icp_configs (id, tenant_id, name, rules_json, persona_json)
-                VALUES (:id, :tenant, :name, :rules, :persona)
-            """),
-            {
-                "id": icp_id,
-                "tenant": tenant_id,
-                "name": "Studio Generated Config",
-                "rules": json.dumps(icp_rules),
-                "persona": json.dumps({})
-            }
-        )
-        
-        # Create agent_run row
-        run_id = str(uuid.uuid4())
-        await session.execute(
-            text("""
-                INSERT INTO agent_runs (id, tenant_id, icp_config_id, status, max_companies, metadata)
-                VALUES (:id, :tenant, :icp, :status, :max_comp, :metadata)
-            """),
-            {
-                "id": run_id,
-                "tenant": tenant_id,
-                "icp": icp_id,
-                "status": "pending",
-                "max_comp": body.max_companies,
-                "metadata": json.dumps({
-                    "original_prompt": body.workflow_plan.intent_summary,
-                    "plan": body.workflow_plan.model_dump()
-                })
-            }
-        )
-        await session.commit()
+    from app.memory.operational import IcpConfigRepository, AgentRunRepository
+    icp_repo = IcpConfigRepository(session_factory)
+    run_repo = AgentRunRepository(session_factory)
+    
+    icp_id = uuid.uuid4()
+    await icp_repo.create(
+        id=icp_id,
+        tenant_id=tenant_id,
+        name="Studio Generated Config",
+        rules_json=icp_rules,
+        persona_json={}
+    )
+    
+    run_id = uuid.uuid4()
+    plan = {
+        "icp_config_id": str(icp_id),
+        "max_companies": body.max_companies,
+        "selected_agents": body.selected_agent_ids,
+        "original_prompt": body.workflow_plan.intent_summary,
+        "plan": body.workflow_plan.model_dump(),
+    }
+    
+    await run_repo.create(
+        id=run_id,
+        tenant_id=tenant_id,
+        status="pending",
+        plan_json=plan,
+    )
     
     # Dispatch to Planner Agent via Celery
     from app.tasks import run_pipeline
-    run_pipeline.delay(run_id, tenant_id, icp_rules, body.selected_agent_ids)
+    run_pipeline.delay(str(run_id), tenant_id, icp_rules, body.selected_agent_ids)
     
     return {
-        "run_id": run_id,
+        "run_id": str(run_id),
         "stream_url": f"/api/v1/stream/{run_id}"
     }
 
 
 @router.get("/studio/agents", response_model=list[AgentDefinition])
 async def get_agents(tenant_id: str = Depends(get_current_tenant)):
-    return AGENT_REGISTRY
+    import os
+    import json
+    agents = list(AGENT_REGISTRY)
+    worker_path = os.path.join(os.path.dirname(__file__), "..", "..", "agents", "workers")
+    if os.path.exists(worker_path):
+        for file in os.listdir(worker_path):
+            if file.endswith(".json"):
+                try:
+                    with open(os.path.join(worker_path, file), "r") as f:
+                        data = json.load(f)
+                        agents.append(AgentDefinition(**data))
+                except Exception:
+                    pass
+    return agents
 
 
 class BuildAgentRequest(BaseModel):
@@ -201,6 +205,7 @@ class BuildAgentRequest(BaseModel):
 async def build_custom_agent(body: BuildAgentRequest) -> dict:
     import os
     import re
+    import json
     # Simplified LLM interaction placeholder for building code
     snake_name = re.sub(r'[^a-z0-9]', '_', body.name.lower())
     
@@ -234,7 +239,11 @@ async def {snake_name}_agent(inputs: Dict[str, Any]) -> Dict[str, Any]:
         icon="ti-plug"
     )
     
+    # Save metadata configuration as JSON
+    with open(os.path.join(worker_path, f"{snake_name}.json"), "w") as f:
+        json.dump(new_agent.model_dump(), f, indent=2)
+    
     return {
-        "files_created": [f"app/agents/workers/{snake_name}.py"],
+        "files_created": [f"app/agents/workers/{snake_name}.py", f"app/agents/workers/{snake_name}.json"],
         "agent_definition": new_agent.model_dump()
     }

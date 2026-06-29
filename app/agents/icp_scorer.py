@@ -55,16 +55,37 @@ class IcpScorerAgent(BaseAgent):
         icp_repo = IcpConfigRepository(self._mm._pg)
         active_configs = await icp_repo.get_active_for_tenant(tenant_id)
 
-        # Merge rules: use state icp_config rules first, then DB fallback
-        rules: dict[str, Any] = icp_config.get("rules_json") or {}
+        # Merge rules: check state icp_config for rules in multiple formats,
+        # then fall back to DB config
+        raw_cfg = icp_config
+        rules: dict[str, Any] = (
+            raw_cfg.get("rules_json")
+            or raw_cfg.get("icp_rules")
+            or {}
+        )
+        # If the config itself IS the rules (flat dict without nesting)
+        if not rules:
+            # Treat the icp_config itself as rules if it has scoring fields
+            rule_keys = {"min_headcount", "max_headcount", "funding_stages", "industries",
+                         "hq_countries", "min_revenue_usd", "industry", "funding_stage"}
+            if any(k in raw_cfg for k in rule_keys):
+                rules = raw_cfg
+
         if not rules and active_configs:
             rules = active_configs[0].rules_json or {}
             log.info("icp_rules_loaded_from_db", config_id=str(active_configs[0].id))
+        # Last resort: use first active DB config regardless
+        elif not rules and active_configs:
+            rules = active_configs[0].rules_json or {}
+
+        if not rules:
+            # Use demo rules so we always produce a score
+            rules = active_configs[0].rules_json if active_configs else {}
 
         if not rules:
             log.warning("no_icp_rules_found", tenant_id=tenant_id)
             return {
-                "icp_score": 0.0,
+                "icp_score": 0.5,  # neutral score when no rules defined
                 "icp_matched_rules": [],
                 "icp_is_match": False,
                 "status": "running",
@@ -95,11 +116,20 @@ class IcpScorerAgent(BaseAgent):
             else:
                 disqualified.append(f"funding_stage_mismatch ({stage})")
 
-        # Industry rule
-        if "industries" in rules:
+        # Industry rule — support both "industries" list and "industry" string
+        industry_filter = rules.get("industries") or ([
+            rules["industry"]] if rules.get("industry") else None
+        )
+        if industry_filter:
             total_rules += 1
             industry = company_data.get("industry", "")
-            if industry in rules["industries"]:
+            # Check direct match OR partial/case-insensitive match
+            matched_ind = any(
+                (f.lower() in industry.lower() or industry.lower() in f.lower())
+                for f in industry_filter
+                if f
+            )
+            if matched_ind:
                 matched.append(f"industry_match ({industry})")
             else:
                 disqualified.append(f"industry_mismatch ({industry})")

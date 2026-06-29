@@ -64,6 +64,46 @@ FUNDING_PATTERNS = {
     "Bootstrapped": r"\bbootstrapped\b|\bprofitable\b",
 }
 
+# Industry detection keywords (order matters — more specific first)
+INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("Fintech",         ["payment", "payments", "banking", "financial services", "fintech",
+                         "lending", "insurtech", "wealth management", "forex", "crypto",
+                         "neobank", "digital bank", "credit card", "wire transfer"]),
+    ("HealthTech",      ["healthcare", "health tech", "healthtech", "telehealth", "medtech",
+                         "electronic health", "patient", "clinical", "hospital", "pharma"]),
+    ("EdTech",          ["education", "edtech", "e-learning", "online learning", "course",
+                         "tutoring", "school", "university", "lms", "learning management"]),
+    ("E-commerce",      ["e-commerce", "ecommerce", "online store", "marketplace", "shopify",
+                         "retail", "checkout", "cart", "product catalog"]),
+    ("Cybersecurity",   ["cybersecurity", "security platform", "threat detection", "siem",
+                         "vulnerability", "endpoint security", "zero trust", "soc"]),
+    ("DevTools",        ["developer tools", "devtools", "sdk", "api platform", "open source",
+                         "developer platform", "ci/cd", "devops", "infrastructure as code"]),
+    ("HR Tech",         ["hr tech", "hrtech", "human resources", "recruitment", "payroll",
+                         "employee engagement", "talent management", "ats", "hris"]),
+    ("MarTech",         ["marketing", "martech", "crm", "customer engagement", "email marketing",
+                         "ad tech", "adtech", "growth platform", "analytics platform"]),
+    ("Logistics",       ["logistics", "supply chain", "shipping", "fulfillment", "last-mile",
+                         "freight", "warehouse", "fleet management"]),
+    ("SaaS",            ["saas", "software as a service", "cloud platform", "subscription",
+                         "b2b software", "enterprise software", "workflow automation"]),
+    ("AI/ML",           ["artificial intelligence", "machine learning", "ai platform", "llm",
+                         "generative ai", "computer vision", "nlp", "deep learning"]),
+    ("Cloud Infrastructure", ["cloud infrastructure", "cloud computing", "kubernetes",
+                              "serverless", "data center", "cloud storage", "paas", "iaas"]),
+    ("Data & Analytics", ["data analytics", "business intelligence", "data platform",
+                          "data pipeline", "data warehouse", "bi tool", "snowflake"]),
+]
+
+
+def _detect_industry(text: str) -> str:
+    lower = text.lower()
+    for industry, keywords in INDUSTRY_KEYWORDS:
+        if any(kw in lower for kw in keywords):
+            return industry
+    return ""
+
+
 
 def _strip_html(html: str) -> str:
     """Remove HTML tags and normalise whitespace."""
@@ -266,6 +306,7 @@ async def enrich_company_from_web(
     headcount = _detect_headcount(page_text)
     funding_stage = _detect_funding_stage(page_text)
     open_roles = _detect_open_roles(page_text)
+    detected_industry = _detect_industry(page_text)
 
     # ── Build enriched data ───────────────────────────────────────────────────
     enriched: dict[str, Any] = {
@@ -275,7 +316,7 @@ async def enrich_company_from_web(
         "tech_stack": tech_stack or seed.get("tech_stack", []),
         "headcount": headcount or seed.get("headcount"),
         "funding_stage": funding_stage or seed.get("funding_stage", ""),
-        "industry": seed.get("industry", ""),
+        "industry": detected_industry or seed.get("industry", ""),
         "hq_country": seed.get("hq_country", "US"),
         "annual_revenue_usd": seed.get("annual_revenue_usd"),
         "open_roles": open_roles or seed.get("open_roles", []),

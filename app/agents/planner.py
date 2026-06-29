@@ -441,9 +441,13 @@ class PlannerAgent:
         try:
             graph = build_planner_graph(self._mm, selected_agents)
             final_state: dict[str, Any] = await graph.ainvoke(initial_state)
-            
-            # Persist whatever data was collected to Neo4j, Redis, Qdrant, and Postgres (audit log)
-            if final_state.get("status") != "skipped":
+
+            # Note: record_company_enriched is called by ContactEnrichmentAgent
+            # during the graph run. The planner just needs to ensure the run
+            # status is written back to Postgres if not already done.
+            final_status = final_state.get("status", "completed")
+            if final_status not in ("completed", "failed", "skipped"):
+                # Fallback: if no summary agent ran, write the data ourselves
                 await self._mm.record_company_enriched(
                     tenant_id=tenant_id,
                     domain=domain,
@@ -452,7 +456,7 @@ class PlannerAgent:
                     signals=final_state.get("signals") or [],
                     run_id=actual_run_id,
                 )
-                
+
             log.info(
                 "planner_run_complete",
                 status=final_state.get("status"),

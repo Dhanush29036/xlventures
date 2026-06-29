@@ -138,6 +138,12 @@ async def get_results(
             except Exception:
                 continue
 
+    # Deduplicate by domain (keep last entry per domain)
+    seen_domains: dict[str, CompanyResult] = {}
+    for c in companies_raw:
+        seen_domains[c.domain] = c
+    companies_raw = list(seen_domains.values())
+
     total_contacts = sum(len(c.people) for c in companies_raw)
     total_signals = sum(len(c.signals) for c in companies_raw)
 

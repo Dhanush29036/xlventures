@@ -32,6 +32,7 @@ class CreateRunRequest(BaseModel):
     max_companies: int = 20
     trigger_keywords: list[str] = []
     company_domain: str | None = None
+    selected_agents: list[str] | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -40,6 +41,7 @@ class CreateRunRequest(BaseModel):
                 "max_companies": 20,
                 "trigger_keywords": ["Series B", "hiring engineers", "launched"],
                 "company_domain": "tesla.com",
+                "selected_agents": ["trigger_monitor", "icp_scorer", "summary"]
             }
         }
     }
@@ -101,6 +103,8 @@ async def create_run(
         "company_domain": body.company_domain,
         "icp_rules": icp.rules_json,
         "icp_persona": icp.persona_json,
+        "selected_agents": body.selected_agents,
+        "force": True,
     }
     run = await run_repo.create(
         tenant_id=tenant_id,
@@ -118,6 +122,7 @@ async def create_run(
                 "run_id": run_id,
                 "tenant_id": tenant_id,
                 "icp_config": plan,
+                "selected_agents": body.selected_agents,
             },
             queue="enrichment",
             task_id=run_id,

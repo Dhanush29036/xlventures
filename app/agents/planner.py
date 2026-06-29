@@ -115,7 +115,12 @@ async def _check_skip_node(
     log = logger.bind(node="check_skip", tenant_id=tenant_id, domain=domain)
 
     # ── Deduplication check ───────────────────────────────────────────────────
-    should_skip = await mm.should_skip_company(tenant_id, domain)
+    selected = state.get("selected_agents")
+    icp_config = state.get("icp_config", {})
+    should_skip = False
+    if not selected and not icp_config.get("force"):
+        should_skip = await mm.should_skip_company(tenant_id, domain)
+        
     if should_skip:
         log.info("company_skipped_as_duplicate")
         return {"should_skip": True, "status": "skipped"}
@@ -436,6 +441,18 @@ class PlannerAgent:
         try:
             graph = build_planner_graph(self._mm, selected_agents)
             final_state: dict[str, Any] = await graph.ainvoke(initial_state)
+            
+            # Persist whatever data was collected to Neo4j, Redis, Qdrant, and Postgres (audit log)
+            if final_state.get("status") != "skipped":
+                await self._mm.record_company_enriched(
+                    tenant_id=tenant_id,
+                    domain=domain,
+                    company_data=final_state.get("company_data") or company_data,
+                    people=final_state.get("people") or [],
+                    signals=final_state.get("signals") or [],
+                    run_id=actual_run_id,
+                )
+                
             log.info(
                 "planner_run_complete",
                 status=final_state.get("status"),

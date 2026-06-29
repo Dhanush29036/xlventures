@@ -59,23 +59,14 @@ async def get_results(
     run = await _get_run_or_404(run_id, tenant_id, request)
 
     mm = request.app.state.memory_manager
-    # Get all companies targeted by this tenant
-    neo4j_data = await mm._neo4j.get_company_with_people(
-        run.plan_json.get("domain", "") if run.plan_json else ""
-    )
+    companies_raw: list[CompanyResult] = []
 
-    # For runs, we get data from Redis episodic summaries
-    prior_runs = []
-    companies_raw = []
-
+    # ── 1. Try audit_log (written by record_company_enriched) ─────────────────
     if run.plan_json:
-        # Collect all domains processed in this run from audit log
-        from sqlalchemy import select as sa_select
+        from sqlalchemy import select as sa_select, and_
         from app.memory.operational import AuditLog
-        from sqlalchemy.ext.asyncio import AsyncSession
 
         async with request.app.state.session_factory() as session:
-            from sqlalchemy import and_
             result = await session.execute(
                 sa_select(AuditLog).where(
                     and_(
@@ -108,6 +99,45 @@ async def get_results(
                 )
             )
 
+    # ── 2. Fallback: read domains from plan_json → query Neo4j directly ────────
+    if not companies_raw and run.plan_json:
+        plan = run.plan_json
+        # Gather candidate domains from plan
+        candidate_domains: list[str] = []
+        if plan.get("company_domain"):
+            candidate_domains.append(plan["company_domain"])
+        if plan.get("domain"):
+            candidate_domains.append(plan["domain"])
+
+        # If no specific domains, use DEMO_COMPANIES domains
+        if not candidate_domains:
+            from app.tasks import DEMO_COMPANIES
+            candidate_domains = [c["domain"] for c in DEMO_COMPANIES]
+
+        for domain in candidate_domains:
+            try:
+                graph_data = await mm._neo4j.get_company_with_people(domain)
+                if not graph_data.get("company"):
+                    continue
+                prior = await mm._redis.get_prior_runs(tenant_id, domain)
+                last_summary = prior[-1] if prior else {}
+                company_node = graph_data.get("company", {})
+
+                companies_raw.append(
+                    CompanyResult(
+                        domain=domain,
+                        name=company_node.get("name", domain),
+                        icp_score=float(last_summary.get("icp_score", 0.0)),
+                        recommended_action=last_summary.get("recommended_action", "review"),
+                        people=graph_data.get("people", []),
+                        signals=graph_data.get("signals", []),
+                        funding_stage=company_node.get("funding_stage", ""),
+                        headcount=company_node.get("headcount", 0) or 0,
+                    )
+                )
+            except Exception:
+                continue
+
     total_contacts = sum(len(c.people) for c in companies_raw)
     total_signals = sum(len(c.signals) for c in companies_raw)
 
@@ -119,6 +149,7 @@ async def get_results(
         total_contacts=total_contacts,
         total_signals=total_signals,
     )
+
 
 
 @router.get("/{run_id}/export")

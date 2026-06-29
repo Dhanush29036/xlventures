@@ -10,6 +10,7 @@ from app.memory.semantic import SemanticICPStore
 from app.memory.manager import MemoryManager
 from app.agents.planner import PlannerAgent
 from app.memory.operational import AgentRunRepository
+from app.agents.web_enricher import enrich_company_from_web
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -113,51 +114,55 @@ async def _run_pipeline_async(run_id: str, tenant_id: str, icp_config: dict, sel
     try:
         # Update run status to running
         await run_repo.update(uuid.UUID(run_id), status="running")
-        
+
+        # Determine which companies to research
         custom_domain = icp_config.get("company_domain")
         if custom_domain:
-            company_name = custom_domain.split(".")[0].capitalize()
-            companies_to_run = [{
-                "domain": custom_domain,
-                "name": company_name,
-                "headcount": 120,
-                "funding_stage": "Series B",
-                "industry": "SaaS",
-                "hq_country": "US",
-                "annual_revenue_usd": 15_000_000,
-                "tech_stack": ["Python", "AWS", "React"],
-                "people": [
-                    {"email": f"cto@{custom_domain}", "name": "Jane Doe", "title": "CTO", "seniority": "C-Suite", "is_decision_maker": True},
-                    {"email": f"vpe@{custom_domain}", "name": "John Doe", "title": "VP Engineering", "seniority": "VP", "is_decision_maker": True},
-                ],
-                "signals": [
-                    {"type": "funding_round", "score": 0.85, "data": {"stage": "Series B", "amount_usd": 20_000_000}},
-                ],
-            }]
+            companies_to_run = [
+                {"domain": custom_domain, "name": custom_domain.split(".")[0].capitalize()}
+            ]
         else:
             companies_to_run = DEMO_COMPANIES
 
+        openai_key = settings.OPENAI_API_KEY or ""
+
         # Execute the planner for each company
         for company in companies_to_run:
+            domain = company["domain"]
+            logger.info("enriching_company_from_web", domain=domain, run_id=run_id)
+
+            # ── REAL-WORLD DATA: fetch live website + news ──────────────────
+            try:
+                enriched_data = await enrich_company_from_web(
+                    domain=domain,
+                    seed_data=company,  # fallback / merge base
+                    openai_api_key=openai_key,
+                )
+            except Exception as web_err:
+                logger.warning("web_enrichment_failed", domain=domain, error=str(web_err))
+                enriched_data = dict(company)  # fall back to seed data
+
+            # Build the company_data dict passed into agent state
             company_data = {
-                "domain": company["domain"],
-                "name": company["name"],
-                "headcount": company["headcount"],
-                "funding_stage": company["funding_stage"],
-                "industry": company["industry"],
-                "hq_country": company["hq_country"],
-                "annual_revenue_usd": company.get("annual_revenue_usd", 0),
-                "tech_stack": company.get("tech_stack", []),
+                k: enriched_data.get(k, company.get(k))
+                for k in [
+                    "domain", "name", "headcount", "funding_stage",
+                    "industry", "hq_country", "annual_revenue_usd",
+                    "tech_stack", "description", "website_url",
+                    "open_roles", "recent_news",
+                ]
             }
+
+            # Build people list (seed + any from enriched)
             people = []
-            for p in company.get("people", []):
+            for p in (enriched_data.get("people") or company.get("people", [])):
                 person = dict(p)
-                person["company_domain"] = company["domain"]
+                person["company_domain"] = domain
                 people.append(person)
 
             await planner.run(
                 tenant_id=tenant_id,
-                domain=company["domain"],
+                domain=domain,
                 company_data=company_data,
                 icp_config=icp_config,
                 people=people,

@@ -131,7 +131,7 @@ async def execute_workflow(
     engine = build_async_engine(settings)
     session_factory = build_session_factory(engine)
     
-    icp_rules = {}
+    icp_rules = {"force": True}  # force=True bypasses duplicate skip for user-triggered studio runs
     if body.workflow_plan.icp_config_extracted:
         icp_rules.update(body.workflow_plan.icp_config_extracted)
     if body.overrides:
@@ -157,6 +157,7 @@ async def execute_workflow(
         "selected_agents": body.selected_agent_ids,
         "original_prompt": body.workflow_plan.intent_summary,
         "plan": body.workflow_plan.model_dump(),
+        "force": True,
     }
     
     await run_repo.create(

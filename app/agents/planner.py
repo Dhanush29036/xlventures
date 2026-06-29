@@ -336,16 +336,17 @@ def build_planner_graph(mm: MemoryManager, selected_agents: list[str] | None = N
                 def _route_after_val_dynamic(state: PlannerState) -> str:
                     if state.get("hitl_required"):
                         return "end_hitl"
-                    if not state.get("validation_passed", True):
-                        return "end_failed"
+                    # Always continue to the next agent (usually summary) even on
+                    # validation failure so icp_score + recommended_action are
+                    # computed and persisted.  SummaryAgent uses icp_score to
+                    # determine "disqualify" action for low-scoring companies.
                     return nxt
-                
+
                 graph.add_conditional_edges(
                     current,
                     _route_after_val_dynamic,
                     {
                         "end_hitl": END,
-                        "end_failed": END,
                         nxt: nxt,
                     }
                 )

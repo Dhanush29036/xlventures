@@ -4,6 +4,7 @@ app/api/routes/results.py — Results retrieval + CSV export.
 
 from __future__ import annotations
 
+import ast
 import csv
 import io
 import uuid
@@ -19,6 +20,48 @@ from app.memory.operational import AgentRunRepository
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/results", tags=["results"])
+
+
+def _parse_neo4j_signals(raw_signals: list[dict]) -> list[dict]:
+    """Normalize Neo4j Signal nodes to a consistent {type, score, data} format."""
+    out: list[dict] = []
+    for s in raw_signals:
+        if not s:
+            continue
+        # data is stored as str(python_dict) via graph.py; parse safely
+        raw_data = s.get("data", "{}")
+        try:
+            data: dict = ast.literal_eval(raw_data) if isinstance(raw_data, str) else raw_data
+        except Exception:
+            data = {}
+        out.append({
+            "type": s.get("signal_type") or s.get("type", "unknown"),
+            "score": float(data.get("score", s.get("score", 0.5))),
+            "occurred_at": s.get("occurred_at", ""),
+            "data": data,
+        })
+    return out
+
+
+def _parse_neo4j_company(node: dict) -> dict:
+    """Extract scalar company fields, falling back to the metadata string."""
+    if not node:
+        return {}
+    # Try to parse metadata string for richer fields
+    meta: dict = {}
+    raw_meta = node.get("metadata", "{}")
+    try:
+        meta = ast.literal_eval(raw_meta) if isinstance(raw_meta, str) else raw_meta
+    except Exception:
+        pass
+    return {
+        "name":          node.get("name") or meta.get("name", ""),
+        "headcount":     node.get("headcount") or meta.get("headcount", 0) or 0,
+        "funding_stage": node.get("funding_stage") or meta.get("funding_stage", ""),
+        "industry":      node.get("industry") or meta.get("industry", ""),
+        "description":   node.get("description") or meta.get("description", ""),
+        "website_url":   node.get("website_url") or meta.get("website_url", ""),
+    }
 
 
 class CompanyResult(BaseModel):
@@ -86,16 +129,23 @@ async def get_results(
             prior = await mm._redis.get_prior_runs(tenant_id, domain)
             last_summary = prior[-1] if prior else {}
 
+            company_info = _parse_neo4j_company(graph_data.get("company", {}))
+            signals = _parse_neo4j_signals(graph_data.get("signals", []))
+
+            # icp_score: try Redis summary first, then audit_log validation entry
+            icp_score = float(last_summary.get("icp_score", d.get("icp_score", 0.0)))
+            action = last_summary.get("recommended_action") or d.get("recommended_action", "review")
+
             companies_raw.append(
                 CompanyResult(
                     domain=domain,
-                    name=graph_data.get("company", {}).get("name", domain),
-                    icp_score=last_summary.get("icp_score", 0.0),
-                    recommended_action=last_summary.get("recommended_action", "unknown"),
+                    name=company_info.get("name") or domain,
+                    icp_score=icp_score,
+                    recommended_action=action,
                     people=graph_data.get("people", []),
-                    signals=graph_data.get("signals", []),
-                    funding_stage=graph_data.get("company", {}).get("funding_stage", ""),
-                    headcount=graph_data.get("company", {}).get("headcount", 0),
+                    signals=signals,
+                    funding_stage=company_info.get("funding_stage", ""),
+                    headcount=int(company_info.get("headcount") or 0),
                 )
             )
 
@@ -121,18 +171,22 @@ async def get_results(
                     continue
                 prior = await mm._redis.get_prior_runs(tenant_id, domain)
                 last_summary = prior[-1] if prior else {}
-                company_node = graph_data.get("company", {})
+
+                company_info = _parse_neo4j_company(graph_data.get("company", {}))
+                signals = _parse_neo4j_signals(graph_data.get("signals", []))
+                icp_score = float(last_summary.get("icp_score", 0.0))
+                action = last_summary.get("recommended_action", "review")
 
                 companies_raw.append(
                     CompanyResult(
                         domain=domain,
-                        name=company_node.get("name", domain),
-                        icp_score=float(last_summary.get("icp_score", 0.0)),
-                        recommended_action=last_summary.get("recommended_action", "review"),
+                        name=company_info.get("name") or domain,
+                        icp_score=icp_score,
+                        recommended_action=action,
                         people=graph_data.get("people", []),
-                        signals=graph_data.get("signals", []),
-                        funding_stage=company_node.get("funding_stage", ""),
-                        headcount=company_node.get("headcount", 0) or 0,
+                        signals=signals,
+                        funding_stage=company_info.get("funding_stage", ""),
+                        headcount=int(company_info.get("headcount") or 0),
                     )
                 )
             except Exception:
